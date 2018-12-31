@@ -9,41 +9,45 @@ import torch.optim as optim
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--embedding_size', default=300)
-parser.add_argument('--batch_size', default=128)
-parser.add_argument('--n_epoch', default=10)
-parser.add_argument('--hidden_size', default=300)
-parser.add_argument('--n_class', default=3)
-parser.add_argument('--pre_processed', default=True)
+parser.add_argument('--embedding_size', type=int, default=300)
+parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--n_epoch', type=int, default=10)
+parser.add_argument('--hidden_size', type=int, default=300)
+parser.add_argument('--n_class', type=int, default=3)
+parser.add_argument('--pre_processed', type=bool, default=False)
 parser.add_argument('--learning_rate', default=0.001)
 parser.add_argument('--l2_reg', default=0)
 parser.add_argument('--clip', default=3.0)
 parser.add_argument('--dropout', default=0.01)
 parser.add_argument('--max_aspect_len', default=0)
-parser.add_argument('--max_context_len', default=0)
+parser.add_argument('--max_sentence_len', default=0)
 parser.add_argument('--dataset', default='data/restaurant/')
 parser.add_argument('--embedding_file_name', default='data/glove.840B.300d.txt')
 parser.add_argument('--embedding', default=0)
 parser.add_argument('--vocab_size', default=0)
+parser.add_argument('--model_size', default=300)
+parser.add_argument('--lamda', default=0.4)
+parser.add_argument('--gamma1', default=1.0)
+parser.add_argument('--gamma2', default=0.5)
 
 config = parser.parse_args()
 
 def main():
     start_time = time.time()
     print('Loading data info ...')
-    word2id, config.max_aspect_len, config.max_context_len = get_data_info(config.dataset, config.pre_processed)
+    word2id, config.max_aspect_len, config.max_sentence_len = get_data_info(config.dataset, config.pre_processed)
     config.vocab_size = len(word2id)
-    train_data = read_data(word2id, config.max_aspect_len, config.max_context_len, config.dataset + 'train',
+    train_data = read_data(word2id, config.max_aspect_len, config.max_sentence_len, config.dataset + 'train',
                            config.pre_processed)
-    test_data = read_data(word2id, config.max_aspect_len, config.max_context_len, config.dataset + 'test',
+    test_data = read_data(word2id, config.max_aspect_len, config.max_sentence_len, config.dataset + 'test',
                           config.pre_processed)
     print('Loading pre-trained word vectors ...')
     config.embedding = load_word_embeddings(config.embedding_file_name, config.embedding_size, word2id)
-    train_dataset = IanDataset(train_data)
-    test_dataset = IanDataset(test_data)
+    train_dataset = DAuMDataset(train_data)
+    test_dataset = DAuMDataset(test_data)
     train_loader = DataLoader(dataset=train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=2)
     test_loader = DataLoader(dataset=test_dataset, batch_size=config.batch_size, shuffle=True, num_workers=2)
-    model = IAN(config).cuda()
+    model = DAuM(config).cuda()
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.l2_reg)
     max_acc = 0
@@ -51,15 +55,15 @@ def main():
         train_total_cases = 0
         train_correct_cases = 0
         for data in train_loader:
-            aspects, contexts, labels, aspect_masks, context_masks = data
-            aspects, contexts, labels = aspects.cuda(), contexts.cuda(), labels.cuda()
-            aspect_masks, context_masks = aspect_masks.cuda(), context_masks.cuda()
+            aspects, sentences, labels, aspect_masks, sentence_masks, aspect_positions = data
+            aspects, sentences, labels = aspects.cuda(), sentences.cuda(), labels.cuda()
+            aspect_masks, sentence_masks = aspect_masks.cuda(), sentence_masks.cuda()
             optimizer.zero_grad()
-            outputs = model(aspects, contexts, aspect_masks, context_masks)
+            outputs, pre_loss, reg_loss = model(sentences, aspects, sentence_masks, aspect_masks, aspect_positions)
             _, predicts = outputs.max(dim=1)
             train_total_cases += labels.shape[0]
             train_correct_cases += (predicts == labels).sum().item()
-            loss = criterion(outputs, labels)
+            loss = criterion(outputs, labels) + config.gamma1 * pre_loss + config.gamma2 * reg_loss
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), config.clip)
             optimizer.step()
@@ -67,10 +71,10 @@ def main():
         test_total_cases = 0
         test_correct_cases = 0
         for data in test_loader:
-            aspects, contexts, labels, aspect_masks, context_masks = data
-            aspects, contexts, labels = aspects.cuda(), contexts.cuda(), labels.cuda()
-            aspect_masks, context_masks = aspect_masks.cuda(), context_masks.cuda()
-            outputs = model(aspects, contexts, aspect_masks, context_masks)
+            aspects, sentences, labels, aspect_masks, sentence_masks = data
+            aspects, sentences, labels = aspects.cuda(), sentences.cuda(), labels.cuda()
+            aspect_masks, sentence_masks = aspect_masks.cuda(), sentence_masks.cuda()
+            outputs, _, _ = model(sentences, aspects, sentence_masks, aspect_masks, aspect_positions)
             _, predicts = outputs.max(dim=1)
             test_total_cases += labels.shape[0]
             test_correct_cases += (predicts == labels).sum().item()

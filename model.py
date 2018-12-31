@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import copy
+from torch.utils.data import Dataset
 
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
@@ -124,3 +125,31 @@ class MultiplicativeAttention(nn.Module):
         else:
             attn_weights = F.softmax(scores, dim=1)
         return attn_weights
+
+class DAuMDataset(Dataset):
+
+    def __init__(self, path):
+        data = np.load(path)
+        self.aspects = torch.from_numpy(data['aspects']).long()
+        self.sentences = torch.from_numpy(data['sentences']).long()
+        self.labels = torch.from_numpy(data['labels']).long()
+        self.aspect_lens = torch.from_numpy(data['aspect_lens']).long()
+        self.sentence_lens = torch.from_numpy(data['sentence_lens']).long()
+        self.aspect_positions = torch.from_numpy(data['aspect_positions']).long()
+        self.len = self.labels.shape[0]
+        aspect_max_len = self.aspects.size(1)
+        sentence_max_len = self.sentences.size(1)
+        self.aspect_mask = torch.zeros(aspect_max_len, aspect_max_len)
+        self.sentence_mask = torch.zeros(sentence_max_len, sentence_max_len)
+        for i in range(aspect_max_len):
+            self.aspect_mask[i, 0:i + 1] = 1
+        for i in range(sentence_max_len):
+            self.context_mask[i, 0:i + 1] = 1
+
+    def __getitem__(self, index):
+        return self.aspects[index], self.sentences[index], self.labels[index], \
+               self.aspect_mask[self.aspect_lens[index] - 1], \
+               self.sentence_mask[self.sentence_lens[index] - 1], self.aspect_positions[index]
+
+    def __len__(self):
+        return self.len

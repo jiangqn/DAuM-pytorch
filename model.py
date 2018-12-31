@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import copy
 from torch.utils.data import Dataset
+import numpy as np
 
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
@@ -13,7 +14,7 @@ class DAuM(nn.Module):
         super(DAuM, self).__init__()
         self.embedding = nn.Embedding(config.vocab_size, config.model_size)
         self.aspect_memory = nn.Parameter(torch.rand(config.aspect_kinds, config.model_size) * 0.02 - 0.01)
-        self.layers = clones(Layer(config.model_size, config.lamda))
+        self.layers = clones(Layer(config.model_size, config.lamda), config.n_layers)
         self.fc = nn.Linear(config.model_size, config.n_class)
         self.weight = nn.Parameter(torch.rand(config.model_size, config.model_size) * 0.02 - 0.01)
         self.aspect_kinds = config.aspect_kinds
@@ -31,10 +32,11 @@ class DAuM(nn.Module):
         aspect_scores = self.aspect_score(aspect, raw_aspect)   # (batch_size)
         time_step = sentence_scores.size(1)
         aspect_scores = aspect_scores.repeat(time_step, 1).transpose(0, 1)
-        scores = torch.max(0, 1 - aspect_scores + sentence_scores)
-        scores = scores * (1 - aspect_positions) * sentence_mask
+        scores = torch.max(torch.tensor(0.0).cuda(), torch.tensor(1.0).cuda() - aspect_scores + sentence_scores)
+        scores = scores * (torch.tensor(1).long().cuda() - aspect_positions).float()
+        scores = scores * sentence_mask
         pre_loss = scores.mean()
-        reg = self.aspect_memory.matmul(self.aspect_memory.transpose()) - torch.eye(self.aspect_kinds)
+        reg = self.aspect_memory.matmul(self.aspect_memory.transpose(0, 1)) - torch.eye(self.aspect_kinds).cuda()
         reg_loss = (reg * reg).sum()
         return output, pre_loss, reg_loss
 
@@ -52,7 +54,7 @@ class DAuM(nn.Module):
     def aspect_score(self, aspect, raw_aspect):
         batch_size = aspect.size(0)
         weight = self.weight.repeat(batch_size, 1, 1)
-        aspect = aspect.unqueeze(1)
+        aspect = aspect.unsqueeze(1)
         mid = aspect.matmul(weight)
         raw_aspect = raw_aspect.unsqueeze(-1)
         scores = mid.matmul(raw_aspect).squeeze()
@@ -73,7 +75,7 @@ class Layer(nn.Module):
         sentiment_sentiment_attn = self.sentiment_sentiment_attn(sentiment, sentiment_memory, mask).unsqueeze(1)
         sentiment_aspect_attn = self.sentiment_aspect_attn(new_aspect, sentiment_memory, mask).unsqueeze(1)
         sentiment_attn = (1 - self.lamda) * sentiment_sentiment_attn + self.lamda * sentiment_aspect_attn
-        sentiment = sentiment_attn.matmul(sentiment_memory)
+        sentiment = sentiment_attn.matmul(sentiment_memory).squeeze()
         aspect = aspect + new_aspect
         return sentiment, aspect
 
@@ -109,8 +111,8 @@ class MultiplicativeAttention(nn.Module):
         # query: (batch_size, query_size)
         # key: (time_step, key_size)
         # mask: (batch_size, time_step)
-        batch_size = key.size(0)
-        time_step = key.size(1)
+        batch_size = query.size(0)
+        time_step = key.size(0)
         weights = self.weights.repeat(batch_size, 1, 1)  # (batch_size, key_size, query_size)
         query = query.unsqueeze(-1)  # (batch_size, query_size, 1)
         mids = weights.matmul(query)  # (batch_size, key_size, 1)
@@ -144,7 +146,7 @@ class DAuMDataset(Dataset):
         for i in range(aspect_max_len):
             self.aspect_mask[i, 0:i + 1] = 1
         for i in range(sentence_max_len):
-            self.context_mask[i, 0:i + 1] = 1
+            self.sentence_mask[i, 0:i + 1] = 1
 
     def __getitem__(self, index):
         return self.aspects[index], self.sentences[index], self.labels[index], \

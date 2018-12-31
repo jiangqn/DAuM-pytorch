@@ -1,15 +1,61 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import copy
+
+def clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 class DAuM(nn.Module):
 
-    def __init__(self):
+    def __init__(self, config):
         super(DAuM, self).__init__()
-        pass
+        self.embedding = nn.Embedding(config.vocab_size, config.model_size)
+        self.aspect_memory = nn.Parameter(torch.rand(config.aspect_kinds, config.model_size) * 0.02 - 0.01)
+        self.layers = clones(Layer(config.model_size, config.lamda))
+        self.fc = nn.Linear(config.model_size, config.n_class)
+        self.weight = nn.Parameter(torch.rand(config.model_size, config.model_size) * 0.02 - 0.01)
+        self.aspect_kinds = config.aspect_kinds
 
-    def forward(self):
-        pass
+    def forward(self, sentence, aspect, sentence_mask, aspect_mask, aspect_positions):
+        sentiment_memory = self.embedding(sentence)
+        aspect = self.embedding(aspect) * aspect_mask.unsqueeze(-1)
+        raw_aspect = aspect.sum(dim=1, keepdim=False) / aspect_mask.sum(dim=1, keepdim=True)
+        aspect = raw_aspect
+        sentiment = raw_aspect
+        for layer in self.layers:
+            sentiment, aspect = layer(sentiment, aspect, sentiment_memory, self.aspect_memory, sentence_mask)
+        output = self.fc(sentiment)
+        sentence_scores = self.score(aspect, sentiment_memory)  # (batch_size, time_step)
+        aspect_scores = self.aspect_score(aspect, raw_aspect)   # (batch_size)
+        time_step = sentence_scores.size(1)
+        aspect_scores = aspect_scores.repeat(time_step, 1).transpose(0, 1)
+        scores = torch.max(0, 1 - aspect_scores + sentence_scores)
+        scores = scores * (1 - aspect_positions) * sentence_mask
+        pre_loss = scores.mean()
+        reg = self.aspect_memory.matmul(self.aspect_memory.transpose()) - torch.eye(self.aspect_kinds)
+        reg_loss = (reg * reg).sum()
+        return output, pre_loss, reg_loss
+
+    def score(self, aspect, sentence):
+        batch_size = sentence.size(0)
+        time_step = sentence.size(1)
+        weight = self.weight.repeat(batch_size, 1, 1)
+        aspect = aspect.unsqueeze(1)
+        mid = aspect.matmul(weight).squeeze()
+        mid = mid.repeat(time_step, 1, 1).transpose(0, 1).unsqueeze(-2)
+        sentence = sentence.unsqueeze(-1)
+        scores = mid.matmul(sentence).squeeze()
+        return scores
+
+    def aspect_score(self, aspect, raw_aspect):
+        batch_size = aspect.size(0)
+        weight = self.weight.repeat(batch_size, 1, 1)
+        aspect = aspect.unqueeze(1)
+        mid = aspect.matmul(weight)
+        raw_aspect = raw_aspect.unsqueeze(-1)
+        scores = mid.matmul(raw_aspect).squeeze()
+        return scores
 
 class Layer(nn.Module):
 
@@ -30,14 +76,11 @@ class Layer(nn.Module):
         aspect = aspect + new_aspect
         return sentiment, aspect
 
-
-
-
 class AdditiveAttention(nn.Module):
 
     def __init__(self, query_size, key_size):
         super(AdditiveAttention, self).__init__()
-        self.project = nn.Linear(query_size + key_size, 1)
+        self.proj = nn.Linear(query_size + key_size, 1)
 
     def forward(self, query, key, mask=None):
         # query: (batch_size, query_size)
@@ -45,7 +88,7 @@ class AdditiveAttention(nn.Module):
         # mask: (batch_size, time_step)
         time_step = key.size(1)
         query = query.repeat(time_step, 1, 1).transpose(0, 1)   # (batch_size, time_step, query_size)
-        scores = self.project(torch.cat([key, query], dim=2)).squeeze()     # (batch_size, time_step)
+        scores = self.proj(torch.cat([key, query], dim=2)).squeeze()     # (batch_size, time_step)
         if mask is not None:
             scores = scores - scores.max(dim=1, keepdim=True)[0]
             scores = torch.exp(scores) * mask
@@ -63,7 +106,7 @@ class MultiplicativeAttention(nn.Module):
 
     def forward(self, query, key, mask=None):
         # query: (batch_size, query_size)
-        # key: (batch_size, time_step, key_size)
+        # key: (time_step, key_size)
         # mask: (batch_size, time_step)
         batch_size = key.size(0)
         time_step = key.size(1)
@@ -71,6 +114,7 @@ class MultiplicativeAttention(nn.Module):
         query = query.unsqueeze(-1)  # (batch_size, query_size, 1)
         mids = weights.matmul(query)  # (batch_size, key_size, 1)
         mids = mids.repeat(time_step, 1, 1, 1).transpose(0, 1)  # (batch_size, time_step, key_size, 1)
+        key = key.repeat(batch_size, 1, 1)
         key = key.unsqueeze(-2)  # (batch_size, time_step, 1, key_size)
         scores = torch.tanh(key.matmul(mids).squeeze() + self.bias).squeeze()  # (batch_size, time_step)
         if mask is not None:

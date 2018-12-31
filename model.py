@@ -18,6 +18,7 @@ class DAuM(nn.Module):
         self.fc = nn.Linear(config.model_size, config.n_class)
         self.weight = nn.Parameter(torch.rand(config.model_size, config.model_size) * 0.02 - 0.01)
         self.aspect_kinds = config.aspect_kinds
+        self.embedding.weight.data.copy_(torch.from_numpy(config.embedding))
 
     def forward(self, sentence, aspect, sentence_mask, aspect_mask, aspect_positions):
         sentiment_memory = self.embedding(sentence)

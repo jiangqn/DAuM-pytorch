@@ -11,7 +11,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 parser = argparse.ArgumentParser()
 parser.add_argument('--embedding_size', type=int, default=300)
 parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--n_epoch', type=int, default=10)
+parser.add_argument('--n_epoch', type=int, default=30)
 parser.add_argument('--hidden_size', type=int, default=300)
 parser.add_argument('--n_class', type=int, default=3)
 parser.add_argument('--n_layers', type=int, default=5)
@@ -44,7 +44,7 @@ def main():
     test_data = read_data(word2id, config.max_aspect_len, config.max_sentence_len, config.dataset + 'test',
                           config.pre_processed)
     print('Loading pre-trained word vectors ...')
-    # config.embedding = load_word_embeddings(config.embedding_file_name, config.embedding_size, word2id)
+    config.embedding = load_word_embeddings(config.embedding_file_name, config.embedding_size, word2id)
     train_dataset = DAuMDataset(train_data)
     test_dataset = DAuMDataset(test_data)
     train_loader = DataLoader(dataset=train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=2)

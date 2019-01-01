@@ -21,14 +21,13 @@ class DAuM(nn.Module):
         self.embedding.weight.data.copy_(torch.from_numpy(config.embedding))
 
     def forward(self, sentence, aspect, sentence_mask, aspect_mask, aspect_positions):
-        sentiment_memory = self.embedding(sentence)
+        sentiment_memory = self.embedding(sentence) * sentence_mask.unsqueeze(-1)
         aspect = self.embedding(aspect) * aspect_mask.unsqueeze(-1)
         raw_aspect = aspect.sum(dim=1, keepdim=False) / aspect_mask.sum(dim=1, keepdim=True)
         aspect = raw_aspect
         sentiment = raw_aspect
         for layer in self.layers:
             sentiment, aspect = layer(sentiment, aspect, sentiment_memory, self.aspect_memory, sentence_mask)
-        output = self.fc(sentiment)
         sentence_scores = self.score(aspect, sentiment_memory)  # (batch_size, time_step)
         aspect_scores = self.aspect_score(aspect, raw_aspect)   # (batch_size)
         time_step = sentence_scores.size(1)
@@ -36,9 +35,12 @@ class DAuM(nn.Module):
         scores = torch.max(torch.tensor(0.0).cuda(), torch.tensor(1.0).cuda() - aspect_scores + sentence_scores)
         scores = scores * (torch.tensor(1).long().cuda() - aspect_positions).float()
         scores = scores * sentence_mask
+        scores, _ = scores.max(dim=1, keepdim=False)
         pre_loss = scores.mean()
         reg = self.aspect_memory.matmul(self.aspect_memory.transpose(0, 1)) - torch.eye(self.aspect_kinds).cuda()
-        reg_loss = (reg * reg).sum()
+        # reg_loss = torch.sqrt((reg * reg).sum())
+        reg_loss = torch.abs(reg).sum()
+        output = self.fc(sentiment)
         return output, pre_loss, reg_loss
 
     def score(self, aspect, sentence):
@@ -76,7 +78,8 @@ class Layer(nn.Module):
         sentiment_sentiment_attn = self.sentiment_sentiment_attn(sentiment, sentiment_memory, mask).unsqueeze(1)
         sentiment_aspect_attn = self.sentiment_aspect_attn(new_aspect, sentiment_memory, mask).unsqueeze(1)
         sentiment_attn = (1 - self.lamda) * sentiment_sentiment_attn + self.lamda * sentiment_aspect_attn
-        sentiment = sentiment_attn.matmul(sentiment_memory).squeeze()
+        new_sentiment = sentiment_attn.matmul(sentiment_memory).squeeze()
+        sentiment = sentiment + new_sentiment
         aspect = aspect + new_aspect
         return sentiment, aspect
 

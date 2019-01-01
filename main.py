@@ -6,26 +6,25 @@ import time
 from torch.utils.data import DataLoader
 import torch.optim as optim
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--embedding_size', type=int, default=300)
 parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--n_epoch', type=int, default=30)
-parser.add_argument('--hidden_size', type=int, default=300)
+parser.add_argument('--n_epoch', type=int, default=10)
 parser.add_argument('--n_class', type=int, default=3)
 parser.add_argument('--n_layers', type=int, default=5)
-parser.add_argument('--aspect_kinds', type=int, default=6)
+parser.add_argument('--aspect_kinds', type=int, default=5)
 parser.add_argument('--pre_processed', type=bool, default=True)
 parser.add_argument('--learning_rate', type=float, default=0.001)
 parser.add_argument('--l2_reg', type=float, default=0)
 parser.add_argument('--clip', type=float, default=3.0)
-parser.add_argument('--dropout', type=float, default=0.01)
+parser.add_argument('--dropout', type=float, default=0.0)
 parser.add_argument('--max_aspect_len', type=int, default=0)
 parser.add_argument('--max_sentence_len', type=int, default=0)
 parser.add_argument('--dataset', default='data/restaurant/')
 parser.add_argument('--embedding_file_name', default='data/glove.840B.300d.txt')
-parser.add_argument('--embedding', type=int, default=0)
+parser.add_argument('--embedding', default=0)
 parser.add_argument('--vocab_size', type=int, default=0)
 parser.add_argument('--model_size', type=int, default=300)
 parser.add_argument('--lamda', type=float, default=0.4)
@@ -83,7 +82,7 @@ def main():
         test_accuracy = test_correct_cases / test_total_cases
         print('[epoch %03d] train accuracy: %.4f test accuracy: %.4f' % (epoch, train_accuracy, test_accuracy))
         max_acc = max(max_acc, test_accuracy)
-    print('max test accuracy:', max_acc)
+    print('max test accuracy: %.4f' % max_acc)
     end_time = time.time()
     print('Time Costing: %s' % (end_time - start_time))
 

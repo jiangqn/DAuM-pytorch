@@ -38,8 +38,7 @@ class DAuM(nn.Module):
         scores, _ = scores.max(dim=1, keepdim=False)
         pre_loss = scores.mean()
         reg = self.aspect_memory.matmul(self.aspect_memory.transpose(0, 1)) - torch.eye(self.aspect_kinds).cuda()
-        # reg_loss = torch.sqrt((reg * reg).sum())
-        reg_loss = torch.abs(reg).sum()
+        reg_loss = torch.sqrt((reg * reg).sum())
         output = self.fc(sentiment)
         return output, pre_loss, reg_loss
 

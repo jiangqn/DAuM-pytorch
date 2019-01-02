@@ -1,4 +1,4 @@
-# IAN-pytorch
+# DAuM-pytorch
 
 This is a pytorch implementation for [Enhanced Aspect Level Sentiment Classification with Auxiliary Memory][1] (Peisong Zhu, Tieyun Qian, COLING 2018).
 
